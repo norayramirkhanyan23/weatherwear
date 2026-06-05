@@ -1,0 +1,10 @@
+streamlit
+google-generativeai
+requests
+pandas
+numpy
+pillow
+beautifulsoup4
+scikit-learn
+joblib
+bcrypt
