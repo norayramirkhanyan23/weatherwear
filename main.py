@@ -8,42 +8,53 @@ import json
 import sqlite3
 import bcrypt
 import pandas as pd
+import time
 
 # =====================
 # CONFIG
 # =====================
 API_KEY = st.secrets["API_KEY"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+HF_TOKEN = st.secrets["HF_TOKEN"]
 
-# Configure Gemini AI
 genai.configure(api_key=GEMINI_API_KEY)
 
 # =====================
-# PAGE
+# PAGE SETUP
 # =====================
 st.set_page_config(
     page_title="AI Personal Stylist | WeatherWear",
+    page_icon="⛅",
     layout="wide"
 )
 
+# =====================
+# SESSION STATE INIT
+# =====================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "styling_data" not in st.session_state:
+    st.session_state.styling_data = None
+if "travel_data" not in st.session_state:
+    st.session_state.travel_data = None
 
 # =====================
 # DATABASE ENGINE
 # =====================
 def init_db():
-    """Creates the necessary tables if they don't exist."""
     conn = sqlite3.connect("weatherwear.db")
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (username TEXT PRIMARY KEY, password TEXT, cold_pref TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS wardrobe
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
                  username TEXT, name TEXT, type TEXT, color TEXT, fabric TEXT, formality TEXT)''')
-    # NEW: History table for tracking past outfits
     c.execute('''CREATE TABLE IF NOT EXISTS history
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 username TEXT, date TEXT, location TEXT, temp INTEGER, condition TEXT, 
-                 outfit_details TEXT, match_score INTEGER, comfort_score INTEGER, 
+                 username TEXT, date TEXT, location TEXT, temp INTEGER, condition TEXT,
+                 outfit_details TEXT, match_score INTEGER, comfort_score INTEGER,
                  weather_score INTEGER, style_score INTEGER)''')
     conn.commit()
     conn.close()
@@ -80,8 +91,8 @@ def get_user_wardrobe(username):
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT name, type, color, fabric, formality FROM wardrobe WHERE username=?", (username,))
-    clothes = [{"name": row["name"], "type": row["type"], "color": row["color"], "fabric": row["fabric"],
-                "formality": row["formality"]} for row in c.fetchall()]
+    clothes = [{"name": row["name"], "type": row["type"], "color": row["color"],
+                "fabric": row["fabric"], "formality": row["formality"]} for row in c.fetchall()]
     conn.close()
     return clothes
 
@@ -125,8 +136,8 @@ def save_outfit_history(username, location, temp, condition, outfit, scores):
     c = conn.cursor()
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     outfit_str = ", ".join(outfit)
-    c.execute("""INSERT INTO history 
-                 (username, date, location, temp, condition, outfit_details, match_score, comfort_score, weather_score, style_score) 
+    c.execute("""INSERT INTO history
+                 (username, date, location, temp, condition, outfit_details, match_score, comfort_score, weather_score, style_score)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
               (username, date_str, location, temp, condition, outfit_str,
                scores.get("match", 0), scores.get("comfort", 0), scores.get("weather", 0), scores.get("style", 0)))
@@ -145,7 +156,19 @@ def get_user_history(username):
 
 
 init_db()
-
+# Ensure Guest account exists
+try:
+    conn = sqlite3.connect("weatherwear.db")
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE username=?", ("Guest",))
+    if not c.fetchone():
+        hashed = bcrypt.hashpw("guest_pass_ww".encode('utf-8'), bcrypt.gensalt())
+        c.execute("INSERT INTO users (username, password, cold_pref) VALUES (?, ?, ?)",
+                  ("Guest", hashed.decode('utf-8'), "Balanced"))
+        conn.commit()
+    conn.close()
+except Exception:
+    pass
 
 # =====================
 # DYNAMIC CSS ENGINE
@@ -177,8 +200,8 @@ section[data-testid="stSidebar"] {
     background-color: #0f0f13;
     border-right: 1px solid #27272a;
 }
-footer {visibility: hidden;}
-header {visibility: hidden;}
+footer { visibility: hidden; }
+header { visibility: hidden; }
 .stButton>button {
     background-color: #fafafa;
     color: #09090b;
@@ -220,7 +243,6 @@ header {visibility: hidden;}
 .forecast-highlight-best { border: 2px solid #4ade80 !important; background-color: rgba(74, 222, 128, 0.1) !important; }
 .forecast-highlight-worst { border: 2px solid #f87171 !important; background-color: rgba(248, 113, 113, 0.1) !important; }
 .forecast-highlight-rain { border: 2px solid #60a5fa !important; background-color: rgba(96, 165, 250, 0.1) !important; }
-
 .forecast-day { font-size: 18px; font-weight: 600; margin-bottom: 10px; }
 .forecast-temp { font-size: 32px; font-weight: 700; }
 .forecast-min-temp { font-size: 16px; color: #71717a; }
@@ -239,13 +261,13 @@ header {visibility: hidden;}
     padding: 40px;
     border-radius: 20px;
     border: 1px solid #27272a;
-    max-width: 400px;
+    max-width: 420px;
     margin: 0 auto;
     margin-top: 10vh;
 }
-.tag-pill { 
-    display: inline-block; background-color: #27272a; color: #d4d4d8; 
-    font-size: 12px; padding: 2px 8px; border-radius: 10px; margin-right: 6px; margin-top: 6px; 
+.tag-pill {
+    display: inline-block; background-color: #27272a; color: #d4d4d8;
+    font-size: 12px; padding: 2px 8px; border-radius: 10px; margin-right: 6px; margin-top: 6px;
 }
 .metric-label { font-size: 14px; color: #a1a1aa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
 .metric-value { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
@@ -256,13 +278,9 @@ img { border-radius: 14px; }
 # =====================
 # AUTHENTICATION UI
 # =====================
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.username = ""
-
 if not st.session_state.logged_in:
     st.markdown("<div class='auth-box'>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align:center;'>WeatherWear</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center;'>⛅ WeatherWear</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#a1a1aa;'>AI Personal Stylist powered by Weather Intelligence</p>",
                 unsafe_allow_html=True)
 
@@ -275,9 +293,18 @@ if not st.session_state.logged_in:
             if verify_login(login_user, login_pass):
                 st.session_state.logged_in = True
                 st.session_state.username = login_user
+                st.session_state.styling_data = None
+                st.session_state.travel_data = None
                 st.rerun()
             else:
                 st.error("Incorrect username or password.")
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Continue as Guest"):
+            st.session_state.logged_in = True
+            st.session_state.username = "Guest"
+            st.session_state.styling_data = None
+            st.session_state.travel_data = None
+            st.rerun()
 
     with auth_tab2:
         reg_user = st.text_input("Choose Username", key="reg_user")
@@ -312,6 +339,8 @@ def get_lazy_weather(city):
             "http://api.openweathermap.org/geo/1.0/direct",
             params={"q": city, "limit": 1, "appid": API_KEY}
         ).json()
+        if not geo or (isinstance(geo, dict) and "message" in geo):
+            return None
         lat, lon = geo[0]["lat"], geo[0]["lon"]
         current = requests.get(
             "https://api.openweathermap.org/data/2.5/weather",
@@ -324,15 +353,19 @@ def get_lazy_weather(city):
             ).json()
             hour = datetime.utcnow().hour
             yesterday = past["hourly"]["temperature_2m"][hour]
-        except:
+        except Exception:
             yesterday = feels - 2
         return {
-            "temp": feels, "diff": feels - yesterday, "condition": current["weather"][0]["main"],
-            "humidity": current["main"]["humidity"], "wind": current["wind"]["speed"],
-            "rainy": "Rain" in current["weather"][0]["main"], "snowy": "Snow" in current["weather"][0]["main"],
-            "windy": current["wind"]["speed"] > 6, "lat": lat, "lon": lon
+            "temp": feels, "diff": round(feels - yesterday, 1),
+            "condition": current["weather"][0]["main"],
+            "humidity": current["main"]["humidity"],
+            "wind": current["wind"]["speed"],
+            "rainy": "Rain" in current["weather"][0]["main"],
+            "snowy": "Snow" in current["weather"][0]["main"],
+            "windy": current["wind"]["speed"] > 6,
+            "lat": lat, "lon": lon
         }
-    except:
+    except Exception:
         return None
 
 
@@ -346,12 +379,12 @@ def tomorrow_vibe(lat, lon):
         today = temps[0]
         tomorrow = sum(temps[1:]) / len(temps[1:])
         if tomorrow > today + 2:
-            return "Tomorrow feels warmer."
+            return "Tomorrow feels warmer — consider lighter layers."
         elif tomorrow < today - 2:
-            return "Tomorrow feels colder."
+            return "Tomorrow feels colder — keep a layer handy."
         else:
-            return "Tomorrow feels similar."
-    except:
+            return "Tomorrow feels similar to today."
+    except Exception:
         return None
 
 
@@ -366,13 +399,11 @@ def get_forecast(lat, lon):
                 "forecast_days": 15, "timezone": "auto"
             }
         ).json()
-
         dates = data["daily"]["time"]
         temps_max = data["daily"]["temperature_2m_max"]
         temps_min = data["daily"]["temperature_2m_min"]
         codes = data["daily"]["weathercode"]
         precip = data["daily"]["precipitation_probability_max"]
-
         forecast = []
         for i in range(len(dates)):
             code = codes[i]
@@ -395,197 +426,344 @@ def get_forecast(lat, lon):
                 "precip": precip[i]
             })
         return forecast
-    except:
+    except Exception:
         return []
+
+
+# =====================
+# AI HELPERS
+# =====================
+def _clean_json(text):
+    """Strip markdown fences and return clean JSON text."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[-1] if text.count("```") >= 2 else text
+        text = text.lstrip("json").strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
+    return text
+
+
+def _call_gemini_with_retry(prompt, retries=3, model_name="gemini-1.5-flash"):
+    model = genai.GenerativeModel(model_name)
+    last_err = None
+    for attempt in range(retries):
+        try:
+            response = model.generate_content(prompt)
+            raw = _clean_json(response.text)
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            last_err = e
+            time.sleep(1)
+        except Exception as e:
+            last_err = e
+            time.sleep(1.5)
+    raise last_err
 
 
 # =====================
 # AI WARDROBE ENGINES
 # =====================
+@st.cache_resource
+def load_fashion_model():
+    """Load the local RandomForest fashion classifier."""
+    import pickle
+    try:
+        with open("fashion_classifier.pkl", "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def _local_classify_image(img: Image.Image):
+    """
+    Run the local ML model to predict clothing type, color, and formality.
+    Returns a dict with type, color, formality — or None if model unavailable.
+    """
+    try:
+        import sys, os
+        # Allow importing helper modules from same directory
+        bundle = load_fashion_model()
+        if bundle is None:
+            return None
+
+        from fashion_model import extract_image_features
+        from color_detector import detect_dominant_color
+
+        features = extract_image_features(img).reshape(1, -1)
+
+        clothing_type = bundle["type_encoder"].inverse_transform(
+            bundle["type_clf"].predict(features)
+        )[0]
+        formality = bundle["formality_encoder"].inverse_transform(
+            bundle["formality_clf"].predict(features)
+        )[0]
+        color = detect_dominant_color(img)
+
+        return {"type": clothing_type, "color": color, "formality": formality}
+    except Exception:
+        return None
+
+
 def analyze_clothing_image(uploaded_file):
     try:
         img = Image.open(uploaded_file)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = """
-        Analyze this clothing item in deep detail. Return ONLY a valid JSON object (no markdown tags or formatting) with these exact keys:
-        - "name": A short, stylish name (e.g., "Vintage Denim Jacket" or "Red Graphic T-Shirt")
-        - "type": Choose strictly ONE from this list: ["T-Shirt", "Hoodie", "Jacket", "Jeans", "Shorts", "Coat", "Sweater", "Shirt", "Trousers", "Accessories"]
-        - "color": The dominant color (e.g., "Navy Blue", "Olive Green")
-        - "fabric": The likely material (e.g., "Cotton", "Wool", "Denim", "Leather", "Polyester")
-        - "formality": Choose ONE: ["Casual", "Smart-Casual", "Business", "Formal"]
-        """
-        response = model.generate_content([prompt, img])
-        clean_response = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(clean_response)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        img.thumbnail((512, 512))
+
+        # Step 1: Run local ML model for type, color, formality
+        local_result = _local_classify_image(img)
+
+        if local_result:
+            # Step 2: Ask Gemini only for fabric + name (what local ML can't do)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = f"""A local fashion classifier has already detected:
+- Clothing type: {local_result['type']}
+- Dominant color: {local_result['color']}
+- Formality level: {local_result['formality']}
+
+Your job: Look at this clothing image and provide ONLY the two missing fields.
+Return ONLY a valid JSON object (no markdown, no backticks) with exactly these two keys:
+- "name": A short stylish product name combining the color and type (e.g., "{local_result['color']} {local_result['type']}")
+- "fabric": The most likely material (e.g., "Cotton", "Wool", "Denim", "Leather", "Polyester", "Linen")"""
+
+            response = model.generate_content([prompt, img])
+            gemini_result = json.loads(_clean_json(response.text))
+
+            return {
+                "name": gemini_result.get("name", f"{local_result['color']} {local_result['type']}"),
+                "type": local_result["type"],
+                "color": local_result["color"],
+                "fabric": gemini_result.get("fabric", "Unknown"),
+                "formality": local_result["formality"],
+            }
+        else:
+            # Full Gemini fallback if model file not found
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = """Analyze this clothing item. Return ONLY a valid JSON object (no markdown, no backticks) with:
+- "name": Short stylish name
+- "type": One of: T-Shirt, Hoodie, Jacket, Jeans, Shorts, Coat, Sweater, Shirt, Trousers, Accessories
+- "color": Dominant color
+- "fabric": Likely material
+- "formality": One of: Casual, Smart-Casual, Business, Formal"""
+            response = model.generate_content([prompt, img])
+            return json.loads(_clean_json(response.text))
+
     except Exception as e:
-        st.error("Could not analyze the image.")
+        st.error(f"Could not analyze the image: {str(e)}")
         return None
 
 
 def analyze_clothing_link(url):
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        page = requests.get(url, headers=headers, timeout=5)
-        soup = BeautifulSoup(page.content, 'html.parser')
+        headers = {"User-Agent": "Mozilla/5.0"}
+        page = requests.get(url, headers=headers, timeout=6)
+        soup = BeautifulSoup(page.content, "html.parser")
         title = soup.title.string if soup.title else "Unknown Item"
-        meta_desc = soup.find('meta', attrs={'name': 'description'})
-        desc = meta_desc['content'] if meta_desc else ""
+        meta_desc = soup.find("meta", attrs={"name": "description"})
+        desc = meta_desc["content"] if meta_desc else ""
         scraped_text = f"Title: {title}\nDescription: {desc}"
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"""
-        Analyze this clothing product webpage data in deep detail. Return ONLY a valid JSON object (no markdown tags) with these exact keys:
-        - "name": A clean, short name based on the title (e.g., "Zara Puffer Coat")
-        - "type": Choose strictly ONE from this list: ["T-Shirt", "Hoodie", "Jacket", "Jeans", "Shorts", "Coat", "Sweater", "Shirt", "Trousers", "Accessories"]
-        - "color": The dominant color
-        - "fabric": Primary material mentioned (e.g., "Cotton", "Wool", "Blend")
-        - "formality": Choose ONE: ["Casual", "Smart-Casual", "Business", "Formal"]
-        Data to analyze:
-        {scraped_text}
-        """
-        response = model.generate_content(prompt)
-        clean_response = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(clean_response)
+        prompt = f"""Analyze this clothing product webpage data. Return ONLY a valid JSON object (no markdown, no backticks) with these exact keys:
+- "name": Clean short name (e.g., "Zara Puffer Coat")
+- "type": One of: T-Shirt, Hoodie, Jacket, Jeans, Shorts, Coat, Sweater, Shirt, Trousers, Accessories
+- "color": Dominant color
+- "fabric": Primary material (e.g., "Cotton", "Wool", "Blend")
+- "formality": One of: Casual, Smart-Casual, Business, Formal
+
+Data to analyze:
+{scraped_text}"""
+        return _call_gemini_with_retry(prompt)
     except Exception as e:
-        st.error("Could not scrape or analyze that link. Ensure it's a valid URL.")
+        st.error(f"Could not scrape or analyze that link: {str(e)}")
         return None
 
 
-def weather_ai(weather, cold_level, wardrobe, activity_formality):
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        if cold_level >= 9:
-            preference = "Runs hot (prefers lighter clothes even when it's cool)"
-        elif cold_level <= 1:
-            preference = "Runs cold (needs extra layers, gets chilly easily)"
-        else:
-            preference = "Balanced (standard temperature preference)"
+def weather_ai(weather, cold_level, wardrobe, activity_formality, style_preference):
+    if cold_level >= 9:
+        preference = "Runs hot — prefers lighter clothes even in cool weather"
+    elif cold_level <= 1:
+        preference = "Runs cold — needs extra layers, gets chilly easily"
+    else:
+        preference = "Balanced — standard temperature preference"
 
-        if wardrobe:
-            wardrobe_text = "\n".join([
-                                          f"- '{item['name']}' (Color: {item['color']}, Fabric: {item['fabric']}, Type: {item['type']}, Formality: {item['formality']})"
-                                          for item in wardrobe])
-        else:
-            wardrobe_text = "No clothes uploaded yet. Suggest general generic clothing types."
-
-        prompt = f"""
-        You are an elite AI personal stylist. 
-        Current Live Weather:
-        - Temperature: {weather['temp']}°C (Feels like)
-        - Condition: {weather['condition']}
-        - Wind Speed: {weather['wind']} m/s
-        - Is it Raining?: {weather['rainy']}
-        - Is it Snowing?: {weather['snowy']}
-        - Temp difference from yesterday: {weather['diff']}°C
-
-        User's Body Temperature Preference: {preference}
-        Target Event Formality: {activity_formality}
-
-        User's Available Closet/Wardrobe: 
-        {wardrobe_text}
-
-        Task: Pick the absolute best outfit from their closet for today's weather using LAYERING LOGIC. Factor in fabric warmth and target formality.
-        Return ONLY a valid JSON object (no markdown, no backticks) with these exact keys:
-        - "hook": A short 3-6 word headline comparing today to yesterday.
-        - "vibe": A friendly, natural paragraph (2-3 sentences) explaining WHY you chose this specific combination.
-        - "outfit": A list of strings containing ONLY the names of the items you selected.
-        - "scores": A dictionary containing four integer values between 0 and 100 representing how good the outfit is: "match", "comfort", "weather", and "style".
-        """
-        response = model.generate_content(prompt)
-        clean_response = response.text.replace('```json', '').replace('```', '').strip()
-        data = json.loads(clean_response)
-        return data.get("hook"), data.get("vibe"), data.get("outfit", []), data.get("scores",
-                                                                                    {"match": 80, "comfort": 80,
-                                                                                     "weather": 80, "style": 80})
-    except Exception as e:
-        return (
-        "Weather analyzed.", "Look at the temperature and dress comfortably!", ["Base Layer", "Pants", "Outerwear"],
-        {"match": 0, "comfort": 0, "weather": 0, "style": 0})
-
-
-def travel_ai(weather, cold_level, wardrobe, dest, days, activities):
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        if cold_level >= 9:
-            preference = "Runs hot"
-        elif cold_level <= 1:
-            preference = "Runs cold"
-        else:
-            preference = "Balanced"
-
+    if wardrobe:
         wardrobe_text = "\n".join([
-                                      f"- '{item['name']}' (Color: {item['color']}, Fabric: {item['fabric']}, Type: {item['type']}, Formality: {item['formality']})"
-                                      for item in wardrobe]) if wardrobe else "Empty closet."
+            f"- '{item['name']}' (Color: {item['color']}, Fabric: {item['fabric']}, "
+            f"Type: {item['type']}, Formality: {item['formality']})"
+            for item in wardrobe
+        ])
+    else:
+        wardrobe_text = "No clothes uploaded yet. Suggest general clothing types appropriate for the weather."
 
-        prompt = f"""
-        You are an elite AI travel stylist.
-        Destination: {dest} | Days: {days} | Planned Activities: {', '.join(activities)}
-        Destination Weather: Temp: {weather['temp']}°C, Condition: {weather['condition']}, Wind: {weather['wind']} m/s.
-        User Prefs: {preference}
-        User's Closet:
-        {wardrobe_text}
+    prompt = f"""You are an elite AI personal stylist with deep knowledge of layering theory, fabric science, and climate dressing.
 
-        Task: Create a highly specific packing list utilizing items FROM THEIR CLOSET. Identify specific "missing items" they need to consider acquiring.
-        Return ONLY a valid JSON object (no markdown, no backticks) with these keys:
-        - "hook": Short headline for the trip.
-        - "packing_list": List of strings referencing items from their closet.
-        - "missing_items": List of strings referencing missing essentials (e.g., "No formal shoes found for your fine dining activity").
-        - "readiness_score": Integer 0-100 indicating how well their closet supports this trip.
-        - "score_explanation": 1-2 sentence explanation of the readiness score.
-        - "activity_tips": List of 2-3 short styling tips for their specific activities.
-        """
-        response = model.generate_content(prompt)
-        clean_response = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(clean_response)
-    except Exception as e:
-        return {"hook": "Trip Analyzed", "packing_list": ["Comfortable clothes"], "missing_items": [],
-                "readiness_score": 50, "score_explanation": "Unable to run deep analysis.",
-                "activity_tips": ["Have a great trip!"]}
+Current Live Weather:
+- Temperature (feels like): {weather['temp']}°C
+- Condition: {weather['condition']}
+- Wind Speed: {weather['wind']} m/s
+- Raining: {weather['rainy']}
+- Snowing: {weather['snowy']}
+- Temp difference from yesterday: {weather['diff']}°C
+
+User Profile:
+- Body Temperature Preference: {preference}
+- Style Identity: {style_preference}
+- Target Formality: {activity_formality}
+
+User's Wardrobe:
+{wardrobe_text}
+
+Task: Select the best outfit using layering logic. Factor in fabric warmth, breathability, and target formality. If the wardrobe is empty, suggest ideal generic pieces.
+
+Return ONLY a valid JSON object (no markdown, no backticks) with these exact keys:
+- "hook": A punchy 3–6 word headline comparing today's feel to yesterday (e.g., "Crisper than yesterday's warmth")
+- "vibe": A friendly 2–3 sentence paragraph explaining your outfit choice and why it works for this weather
+- "outfit": A list of strings — the names of the selected items (from wardrobe or generic suggestions)
+- "scores": A dict with four integer keys (0–100): "match", "comfort", "weather", "style"
+"""
+    try:
+        data = _call_gemini_with_retry(prompt)
+        return (
+            data.get("hook", "Weather analyzed."),
+            data.get("vibe", "Dress comfortably for the conditions!"),
+            data.get("outfit", ["Base Layer", "Pants", "Outerwear"]),
+            data.get("scores", {"match": 80, "comfort": 80, "weather": 80, "style": 80})
+        )
+    except Exception:
+        return (
+            "Weather analyzed.",
+            "Look at the temperature and dress comfortably for your day!",
+            ["Base Layer", "Pants", "Outerwear"],
+            {"match": 0, "comfort": 0, "weather": 0, "style": 0}
+        )
+
+
+def travel_ai(weather, cold_level, wardrobe, dest, days, activities, style_preference):
+    preference = "Runs hot" if cold_level >= 9 else "Runs cold" if cold_level <= 1 else "Balanced"
+    wardrobe_text = "\n".join([
+        f"- '{item['name']}' (Color: {item['color']}, Fabric: {item['fabric']}, "
+        f"Type: {item['type']}, Formality: {item['formality']})"
+        for item in wardrobe
+    ]) if wardrobe else "Empty closet."
+
+    activities_str = ", ".join(activities) if activities else "General sightseeing"
+
+    prompt = f"""You are an elite AI travel stylist.
+
+Trip Details:
+- Destination: {dest}
+- Duration: {days} days
+- Planned Activities: {activities_str}
+
+Destination Weather:
+- Temperature: {weather['temp']}°C
+- Condition: {weather['condition']}
+- Wind: {weather['wind']} m/s
+- Raining: {weather['rainy']}
+
+User Profile:
+- Thermal Preference: {preference}
+- Style Identity: {style_preference}
+
+User's Wardrobe:
+{wardrobe_text}
+
+Task: Create a packing list using items FROM their wardrobe. Identify missing essentials they should acquire.
+
+Return ONLY a valid JSON object (no markdown, no backticks) with these exact keys:
+- "hook": A short punchy headline for the trip (e.g., "Tokyo in the Rain: Layered & Ready")
+- "packing_list": List of strings referencing wardrobe items to pack
+- "missing_items": List of strings for essentials not in their wardrobe (e.g., "No waterproof jacket for rainy conditions")
+- "readiness_score": Integer 0–100 indicating closet readiness for this trip
+- "score_explanation": 1–2 sentence explanation of the readiness score
+- "activity_tips": List of 2–3 short styling tips for their specific activities
+"""
+    try:
+        return _call_gemini_with_retry(prompt)
+    except Exception:
+        return {
+            "hook": "Trip Blueprint Generated",
+            "packing_list": ["Versatile Outfits", "Comfortable Shoes"],
+            "missing_items": [],
+            "readiness_score": 50,
+            "score_explanation": "Unable to run deep analysis. Add items to your closet for better results.",
+            "activity_tips": ["Layering is always a safe bet!", "Pack versatile neutral colors."]
+        }
 
 
 def analytics_ai(wardrobe):
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        wardrobe_text = "\n".join(
-            [f"- '{item['name']}' (Type: {item['type']}, Fabric: {item['fabric']}, Formality: {item['formality']})" for
-             item in wardrobe]) if wardrobe else "Empty closet."
-        prompt = f"""
-        You are an AI wardrobe analyst. Review this closet:
-        {wardrobe_text}
+    wardrobe_text = "\n".join([
+        f"- '{item['name']}' (Type: {item['type']}, Fabric: {item['fabric']}, Formality: {item['formality']})"
+        for item in wardrobe
+    ]) if wardrobe else "Empty closet."
 
-        Task: Identify critical missing essentials to build a complete capsule wardrobe (e.g., waterproof jacket, formal wear, winter coat). Provide a seasonal readiness score.
-        Return ONLY a valid JSON object (no markdown, no backticks) with these keys:
-        - "seasonal_readiness": Integer 0-100.
-        - "missing_essentials": List of 3-5 critical items missing from their closet.
-        - "suggestions": A 2-3 sentence paragraph of strategic wardrobe improvement advice.
-        """
-        response = model.generate_content(prompt)
-        clean_response = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(clean_response)
-    except Exception as e:
-        return {"seasonal_readiness": 0, "missing_essentials": ["Unable to analyze"],
-                "suggestions": "Add more items to your closet."}
+    prompt = f"""You are an AI wardrobe analyst specializing in capsule wardrobes and climate dressing.
+
+User's Closet:
+{wardrobe_text}
+
+Task: Analyze this wardrobe for completeness across all seasons and occasions. Identify gaps and provide strategic advice.
+
+Return ONLY a valid JSON object (no markdown, no backticks) with these exact keys:
+- "seasonal_readiness": Integer 0–100 indicating overall seasonal preparedness
+- "missing_essentials": List of 3–5 critical items missing (e.g., "Waterproof outer layer for rain", "Formal shoes for business events")
+- "suggestions": A 2–3 sentence strategic paragraph on how to improve this wardrobe
+"""
+    try:
+        return _call_gemini_with_retry(prompt)
+    except Exception:
+        return {
+            "seasonal_readiness": 0,
+            "missing_essentials": ["Unable to analyze — add items to your closet"],
+            "suggestions": "Add more items to your closet to receive a personalized wardrobe analysis."
+        }
 
 
 # =====================
 # SIDEBAR
 # =====================
 with st.sidebar:
-    st.markdown(f"### 👋 Welcome, {current_user}!")
+    st.markdown("### 🌤️ WeatherWear")
+    if current_user == "Guest":
+        st.markdown("<small style='color:#71717a;'>Browsing as Guest</small>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<small style='color:#71717a;'>👋 {current_user}</small>", unsafe_allow_html=True)
+
     if st.button("Log Out"):
         st.session_state.logged_in = False
         st.session_state.username = ""
+        st.session_state.styling_data = None
+        st.session_state.travel_data = None
         st.rerun()
 
     st.markdown("---")
-    st.markdown("## Stylist Preferences")
+    st.markdown("## Style Preferences")
+
+    style_pref = st.selectbox("Style Identity", ["Menswear", "Womenswear", "Unisex / Androgynous"])
     cold_pref = st.select_slider("Body Temp Preference", options=["Warm", "Balanced", "Cold"], value=saved_pref)
     if cold_pref != saved_pref:
         update_user_pref(current_user, cold_pref)
-
     day_formality = st.selectbox("Target Formality", ["Casual", "Smart-Casual", "Business", "Formal"])
 
     st.markdown("---")
     st.markdown("## Manage Closet")
+
+    if st.button("✨ Load AI Test Wardrobe"):
+        demo_items = [
+            ("Black Leather Jacket", "Jacket", "Black", "Leather", "Smart-Casual"),
+            ("Classic Blue Jeans", "Jeans", "Blue", "Denim", "Casual"),
+            ("White Linen Shirt", "Shirt", "White", "Linen", "Smart-Casual"),
+            ("Grey Cashmere Sweater", "Sweater", "Grey", "Wool", "Business"),
+            ("Dark Navy Suit Trousers", "Trousers", "Navy", "Wool", "Formal"),
+            ("Yellow Puffer Coat", "Coat", "Yellow", "Polyester", "Casual"),
+            ("Basic Black T-Shirt", "T-Shirt", "Black", "Cotton", "Casual"),
+        ]
+        clear_user_wardrobe(current_user)
+        for item in demo_items:
+            add_clothing_to_db(current_user, item[0], item[1], item[2], item[3], item[4])
+        st.toast("✅ AI Test Wardrobe loaded!", icon="👕")
+        st.rerun()
 
     img_tab, link_tab = st.tabs(["Upload Photo", "Paste Link"])
 
@@ -595,10 +773,10 @@ with st.sidebar:
             with st.spinner("AI is analyzing fabric and color..."):
                 ai_data = analyze_clothing_image(uploaded_file)
                 if ai_data:
-                    add_clothing_to_db(current_user, ai_data.get('name', 'Item'), ai_data.get('type', 'Misc'),
-                                       ai_data.get('color', 'Mixed'), ai_data.get('fabric', 'Unknown'),
-                                       ai_data.get('formality', 'Casual'))
-                    st.success(f"Added {ai_data['name']}!")
+                    add_clothing_to_db(current_user, ai_data.get("name", "Item"), ai_data.get("type", "Misc"),
+                                       ai_data.get("color", "Mixed"), ai_data.get("fabric", "Unknown"),
+                                       ai_data.get("formality", "Casual"))
+                    st.toast(f"👕 {ai_data.get('name', 'Item')} added to your closet!", icon="✅")
                     st.rerun()
 
     with link_tab:
@@ -607,27 +785,25 @@ with st.sidebar:
             with st.spinner("AI is reading the website details..."):
                 ai_data = analyze_clothing_link(clothing_url)
                 if ai_data:
-                    add_clothing_to_db(current_user, ai_data.get('name', 'Item'), ai_data.get('type', 'Misc'),
-                                       ai_data.get('color', 'Mixed'), ai_data.get('fabric', 'Unknown'),
-                                       ai_data.get('formality', 'Casual'))
-                    st.success(f"Added {ai_data['name']}!")
+                    add_clothing_to_db(current_user, ai_data.get("name", "Item"), ai_data.get("type", "Misc"),
+                                       ai_data.get("color", "Mixed"), ai_data.get("fabric", "Unknown"),
+                                       ai_data.get("formality", "Casual"))
+                    st.toast(f"👕 {ai_data.get('name', 'Item')} added to your closet!", icon="✅")
                     st.rerun()
 
     st.markdown("---")
-    st.markdown("### Your Closet")
+    st.markdown("### Your Active Closet")
     if not user_wardrobe:
-        st.info("Your closet is empty. Add some clothes!")
+        st.info("Your closet is empty. Add items to enable weather matching!")
     else:
         for item in user_wardrobe:
             st.markdown(
-                f"""
-                <div style="background-color: #111827; padding: 12px; border-radius: 12px; margin-bottom: 8px; border: 1px solid #27272a;">
+                f"""<div style="background-color: #111827; padding: 12px; border-radius: 12px; margin-bottom: 8px; border: 1px solid #27272a;">
                     <strong>{item['name']}</strong><br>
                     <span class="tag-pill">{item['type']}</span>
                     <span class="tag-pill">{item['fabric']}</span>
                     <span class="tag-pill">{item['formality']}</span>
-                </div>
-                """,
+                </div>""",
                 unsafe_allow_html=True
             )
         if st.button("Clear Closet"):
@@ -640,10 +816,15 @@ cold_value = cold_map[cold_pref]
 # =====================
 # TABS
 # =====================
-tab1, tab2, tab3, tab4 = st.tabs(["Daily Stylist", "Travel Concierge", "Wardrobe Analytics", "Styling History"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "⛅ Daily Stylist",
+    "✈️ Travel Concierge",
+    "📊 Wardrobe Analytics",
+    "📖 Styling History"
+])
 
 # =====================================================
-# DAILY STYLIST (WEATHER) TAB
+# DAILY STYLIST TAB
 # =====================================================
 with tab1:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -652,125 +833,106 @@ with tab1:
         st.markdown("<h1 style='text-align:center;'>WeatherWear Studio</h1>", unsafe_allow_html=True)
         city = st.text_input("Where are you?", "Yerevan")
 
-        if st.button("Generate Styling"):
+        if st.button("Generate Outfit Recommendation"):
             weather = get_lazy_weather(city)
-
             if weather:
-                bg_css = get_weather_css(weather["condition"])
-                st.markdown(f"<style>.stApp {{ background: {bg_css} }}</style>", unsafe_allow_html=True)
+                with st.status("🤖 Analyzing weather and assembling your outfit...", expanded=True) as status:
+                    st.write("📡 Fetching live atmospheric data...")
+                    st.write(f"👕 Cross-referencing {len(user_wardrobe)} closet items with current conditions...")
+                    st.write("🧠 Applying layering logic and style constraints...")
+                    hook, vibe, outfit, scores = weather_ai(weather, cold_value, user_wardrobe, day_formality, style_pref)
+                    forecast_vibe = tomorrow_vibe(weather["lat"], weather["lon"])
+                    forecast_data = get_forecast(weather["lat"], weather["lon"])
+                    status.update(label="✅ Outfit Ready!", state="complete", expanded=False)
 
-                hook, vibe, outfit, scores = weather_ai(weather, cold_value, user_wardrobe, day_formality)
-                forecast = tomorrow_vibe(weather["lat"], weather["lon"])
-                forecast_data = get_forecast(weather["lat"], weather["lon"])
-
-                # Save to history
+                st.session_state.styling_data = {
+                    "weather": weather, "hook": hook, "vibe": vibe, "outfit": outfit,
+                    "scores": scores, "forecast": forecast_vibe, "forecast_data": forecast_data,
+                    "city": city
+                }
                 if outfit:
-                    save_outfit_history(current_user, city, weather['temp'], weather['condition'], outfit, scores)
-
-                icon = "☀"
-                if weather["rainy"]:
-                    icon = "☂"
-                elif weather["snowy"]:
-                    icon = "❄"
-                elif weather["windy"]:
-                    icon = "☼"
-
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown(f"<div class='huge-temp'>{icon} {weather['temp']}°</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='hook'>{hook}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='vibe'>{vibe}</div>", unsafe_allow_html=True)
-                if forecast: st.markdown(f"<div class='forecast'>{forecast}</div>", unsafe_allow_html=True)
-                st.markdown("<br><hr>", unsafe_allow_html=True)
-
-                # SCORES DISPLAY
-                st.markdown("### Styling Metrics")
-                sc1, sc2, sc3, sc4 = st.columns(4)
-                with sc1:
-                    st.markdown("<div class='metric-label'>Outfit Match</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='metric-value'>{scores.get('match', 0)}/100</div>", unsafe_allow_html=True)
-                    st.progress(scores.get('match', 0) / 100)
-                with sc2:
-                    st.markdown("<div class='metric-label'>Comfort</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='metric-value'>{scores.get('comfort', 0)}/100</div>",
-                                unsafe_allow_html=True)
-                    st.progress(scores.get('comfort', 0) / 100)
-                with sc3:
-                    st.markdown("<div class='metric-label'>Weather</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='metric-value'>{scores.get('weather', 0)}/100</div>",
-                                unsafe_allow_html=True)
-                    st.progress(scores.get('weather', 0) / 100)
-                with sc4:
-                    st.markdown("<div class='metric-label'>Style</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='metric-value'>{scores.get('style', 0)}/100</div>", unsafe_allow_html=True)
-                    st.progress(scores.get('style', 0) / 100)
-
-                st.markdown("<br>", unsafe_allow_html=True)
-
-                st.markdown("### Recommended Pieces")
-                for item in outfit:
-                    st.markdown(f"<div class='outfit-card'>✧ {item}</div>", unsafe_allow_html=True)
-
-                with st.popover("⚙️ View Technical Weather Stats"):
-                    st.markdown("**Live Readings:**")
-                    st.metric("Humidity", f"{weather['humidity']}%")
-                    st.metric("Wind Speed", f"{weather['wind']} m/s")
-                    st.metric("Temp Diff", f"{weather['diff']}°C vs yesterday")
-
-                st.markdown("<br>", unsafe_allow_html=True)
-
-                with st.expander("📅 View Extended Weather Intelligence"):
-                    forecast_choice = st.selectbox("Forecast Length", ["7 Days", "15 Days"])
-                    days_to_show = 15 if forecast_choice == "15 Days" else 7
-
-                    # Analytics for highlighting
-                    best_day = min(forecast_data[:days_to_show], key=lambda x: abs(x['temp_max'] - 22) + x['precip'])
-                    worst_day = max(forecast_data[:days_to_show], key=lambda x: abs(x['temp_max'] - 22) + x['precip'])
-                    rainiest_day = max(forecast_data[:days_to_show], key=lambda x: x['precip'])
-
-                    for row_start in range(0, days_to_show, 5):
-                        cols = st.columns(5)
-                        for i in range(5):
-                            idx = row_start + i
-                            if idx >= days_to_show: break
-
-                            day = forecast_data[idx]
-                            icon = "☀"
-                            if day["condition"] == "Rain":
-                                icon = "☂"
-                            elif day["condition"] == "Snow":
-                                icon = "❄"
-                            elif day["condition"] == "Cloudy":
-                                icon = "☁"
-
-                            # Highlighting logic
-                            card_class = "forecast-card"
-                            badge_html = ""
-                            if day == best_day:
-                                card_class += " forecast-highlight-best"
-                                badge_html = "<div class='tag-pill' style='background: #4ade80; color: #000;'>Best Day</div>"
-                            elif day == rainiest_day and day['precip'] > 20:
-                                card_class += " forecast-highlight-rain"
-                                badge_html = "<div class='tag-pill' style='background: #60a5fa; color: #000;'>Rainiest</div>"
-                            elif day == worst_day:
-                                card_class += " forecast-highlight-worst"
-                                badge_html = "<div class='tag-pill' style='background: #f87171; color: #000;'>Extreme</div>"
-
-                            with cols[i]:
-                                st.markdown(
-                                    f"""
-                                    <div class="{card_class}">
-                                        {badge_html}
-                                        <div class="forecast-day" style="margin-top:8px;">{day['day']}</div>
-                                        <div class="forecast-temp">{day['temp_max']}°</div>
-                                        <div class="forecast-min-temp">Min {day['temp_min']}°</div>
-                                        <div style="font-size:40px; margin-top:10px;">{icon}</div>
-                                        <div class="forecast-condition">{day['condition']}</div>
-                                    </div>
-                                    """,
-                                    unsafe_allow_html=True
-                                )
+                    save_outfit_history(current_user, city, weather["temp"], weather["condition"], outfit, scores)
             else:
-                st.error("Couldn't understand the weather there.")
+                st.error("Couldn't retrieve weather for that location. Please check the city name.")
+
+    if st.session_state.styling_data:
+        data = st.session_state.styling_data
+        weather = data["weather"]
+        scores = data["scores"]
+
+        bg_css = get_weather_css(weather["condition"])
+        st.markdown(f"<style>.stApp {{ background: {bg_css} }}</style>", unsafe_allow_html=True)
+
+        icon = "☂" if weather["rainy"] else "❄" if weather["snowy"] else "☼" if weather["windy"] else "☀"
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(f"<div class='huge-temp'>{icon} {weather['temp']}°</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='hook'>{data['hook']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='vibe'>{data['vibe']}</div>", unsafe_allow_html=True)
+        if data["forecast"]:
+            st.markdown(f"<div class='forecast'>{data['forecast']}</div>", unsafe_allow_html=True)
+        st.markdown("<br><hr>", unsafe_allow_html=True)
+
+        st.markdown("### Weather Suitability & Style Metrics")
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        metric_defs = [("Outfit Match", "match"), ("Comfort", "comfort"), ("Weather Defense", "weather"), ("Style", "style")]
+        for col, (title, key) in zip([sc1, sc2, sc3, sc4], metric_defs):
+            with col:
+                st.markdown(f"<div class='metric-label'>{title}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='metric-value'>{scores.get(key, 0)}/100</div>", unsafe_allow_html=True)
+                st.progress(scores.get(key, 0) / 100)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("### AI Recommended Layers")
+        for item in data["outfit"]:
+            st.markdown(f"<div class='outfit-card'>✧ {item}</div>", unsafe_allow_html=True)
+
+        with st.popover("⚙️ Technical Weather Stats"):
+            st.metric("Humidity", f"{weather['humidity']}%")
+            st.metric("Wind Speed", f"{weather['wind']} m/s")
+            st.metric("Temp Diff vs Yesterday", f"{weather['diff']}°C")
+
+        with st.expander("📅 Extended Weather Forecast"):
+            forecast_choice = st.selectbox("Forecast Length", ["7 Days", "15 Days"])
+            days_to_show = 15 if forecast_choice == "15 Days" else 7
+            f_data = data["forecast_data"]
+
+            if f_data:
+                valid_data = f_data[:days_to_show]
+                best_day = min(valid_data, key=lambda x: abs(x["temp_max"] - 22) + x["precip"])
+                worst_day = max(valid_data, key=lambda x: abs(x["temp_max"] - 22) + x["precip"])
+                rainiest_day = max(valid_data, key=lambda x: x["precip"])
+
+                for row_start in range(0, len(valid_data), 5):
+                    cols = st.columns(5)
+                    for i in range(5):
+                        idx = row_start + i
+                        if idx >= len(valid_data):
+                            break
+                        day = valid_data[idx]
+                        day_icon = "☂" if day["condition"] == "Rain" else "❄" if day["condition"] == "Snow" else "☁" if day["condition"] == "Cloudy" else "☀"
+
+                        c_class, badge = "forecast-card", ""
+                        if day == best_day:
+                            c_class, badge = "forecast-card forecast-highlight-best", "<div class='tag-pill' style='background: #4ade80; color: #000;'>Best Day</div>"
+                        elif day == rainiest_day and day["precip"] > 20:
+                            c_class, badge = "forecast-card forecast-highlight-rain", "<div class='tag-pill' style='background: #60a5fa; color: #000;'>Rainiest</div>"
+                        elif day == worst_day:
+                            c_class, badge = "forecast-card forecast-highlight-worst", "<div class='tag-pill' style='background: #f87171; color: #000;'>Extreme</div>"
+
+                        with cols[i]:
+                            st.markdown(f"""
+<div class="{c_class}">
+{badge}
+<div class="forecast-day" style="margin-top:8px;">{day['day']}</div>
+<div class="forecast-temp">{day['temp_max']}°</div>
+<div class="forecast-min-temp">Min {day['temp_min']}°</div>
+<div style="font-size:40px; margin-top:10px;">{day_icon}</div>
+<div class="forecast-condition">{day['condition']}</div>
+</div>
+""", unsafe_allow_html=True)
+            else:
+                st.info("Forecast data unavailable.")
 
 # =====================================================
 # TRAVEL CONCIERGE TAB
@@ -785,7 +947,7 @@ with tab2:
     with c_tr2:
         destination = st.text_input("Destination", "Tokyo", key="travel_dest")
     with c_tr3:
-        trip_days = st.slider("Trip length", 1, 30, 5)
+        trip_days = st.slider("Trip length (days)", 1, 30, 5)
 
     activities = st.multiselect(
         "What will you do?",
@@ -795,55 +957,56 @@ with tab2:
     if st.button("Analyze Trip & Generate Packing List"):
         home_weather = get_lazy_weather(start_city)
         travel_weather = get_lazy_weather(destination)
-
         if travel_weather and home_weather:
-            bg_css = get_weather_css(travel_weather["condition"])
-            st.markdown(f"<style>.stApp {{ background: {bg_css} }}</style>", unsafe_allow_html=True)
-
-            with st.spinner("AI is analyzing destination climatology and your closet..."):
-                t_res = travel_ai(travel_weather, cold_value, user_wardrobe, destination, trip_days, activities)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("<div class='travel-box'>", unsafe_allow_html=True)
-
-            top_col1, top_col2 = st.columns([3, 1])
-            with top_col1:
-                st.markdown(f"<div class='small-label'>{destination.upper()} • {trip_days} DAYS</div>",
-                            unsafe_allow_html=True)
-                st.markdown(f"<div class='hook'>{t_res.get('hook', 'Your Trip Blueprint')}</div>",
-                            unsafe_allow_html=True)
-                st.markdown(f"<div class='vibe'>{t_res.get('score_explanation', '')}</div>", unsafe_allow_html=True)
-            with top_col2:
-                st.markdown("<div class='metric-label'>Packing Readiness</div>", unsafe_allow_html=True)
-                score = t_res.get('readiness_score', 0)
-                st.markdown(f"<div class='huge-temp' style='font-size:48px;'>{score}/100</div>", unsafe_allow_html=True)
-                st.progress(score / 100)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            p_col1, p_col2 = st.columns(2)
-            with p_col1:
-                st.markdown("### 🧳 Pack From Your Closet")
-                for item in t_res.get("packing_list", []):
-                    st.markdown(f"<div class='outfit-card'>✓ {item}</div>", unsafe_allow_html=True)
-            with p_col2:
-                st.markdown("### 🛒 Missing Essentials")
-                if not t_res.get("missing_items"):
-                    st.success("Your closet is perfectly equipped for this trip!")
-                else:
-                    for item in t_res.get("missing_items", []):
-                        st.markdown(
-                            f"<div class='outfit-card' style='border-color: #ef4444; color: #fca5a5;'>✗ {item}</div>",
-                            unsafe_allow_html=True)
-
-            if t_res.get("activity_tips"):
-                with st.popover("💡 View Stylist Activity Notes"):
-                    for tip in t_res.get("activity_tips", []):
-                        st.markdown(f"<div class='vibe'>• {tip}</div>", unsafe_allow_html=True)
-
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.status("🧳 Analyzing destination weather and your closet...", expanded=True) as t_status:
+                st.write(f"🌍 Fetching weather for {destination}...")
+                st.write(f"👗 Matching {len(user_wardrobe)} wardrobe items to your trip...")
+                st.write("📋 Generating packing list and gap analysis...")
+                t_res = travel_ai(travel_weather, cold_value, user_wardrobe, destination, trip_days, activities, style_pref)
+                t_status.update(label="✅ Packing List Ready!", state="complete", expanded=False)
+            st.session_state.travel_data = {"res": t_res, "weather": travel_weather}
         else:
-            st.error("Couldn't analyze this trip.")
+            st.error("Couldn't retrieve weather for this trip. Please check city names.")
+
+    if st.session_state.travel_data:
+        t_res = st.session_state.travel_data["res"]
+        t_weather = st.session_state.travel_data["weather"]
+
+        bg_css = get_weather_css(t_weather["condition"])
+        st.markdown(f"<style>.stApp {{ background: {bg_css} }}</style>", unsafe_allow_html=True)
+
+        st.markdown("<br><div class='travel-box'>", unsafe_allow_html=True)
+        top_col1, top_col2 = st.columns([3, 1])
+        with top_col1:
+            st.markdown(f"<div class='small-label'>{destination.upper()} • {trip_days} DAYS</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='hook'>{t_res.get('hook', 'Your Trip Blueprint')}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='vibe'>{t_res.get('score_explanation', '')}</div>", unsafe_allow_html=True)
+        with top_col2:
+            score = t_res.get("readiness_score", 0)
+            st.markdown("<div class='metric-label'>Packing Readiness</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='huge-temp' style='font-size:48px;'>{score}/100</div>", unsafe_allow_html=True)
+            st.progress(score / 100)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        p_col1, p_col2 = st.columns(2)
+        with p_col1:
+            st.markdown("### 🧳 Pack From Your Closet")
+            for item in t_res.get("packing_list", []):
+                st.markdown(f"<div class='outfit-card'>✓ {item}</div>", unsafe_allow_html=True)
+        with p_col2:
+            st.markdown("### 🛒 Missing Essentials")
+            if not t_res.get("missing_items"):
+                st.success("Your closet is perfectly equipped for this trip!")
+            else:
+                for item in t_res.get("missing_items", []):
+                    st.markdown(f"<div class='outfit-card' style='border-color: #ef4444; color: #fca5a5;'>✗ {item}</div>", unsafe_allow_html=True)
+
+        if t_res.get("activity_tips"):
+            with st.popover("💡 Activity & Style Notes"):
+                for tip in t_res.get("activity_tips", []):
+                    st.markdown(f"<div class='vibe'>• {tip}</div>", unsafe_allow_html=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================================================
 # WARDROBE ANALYTICS TAB
@@ -857,27 +1020,25 @@ with tab3:
     else:
         df = pd.DataFrame(user_wardrobe)
 
-        # High Level Metrics
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Items", len(df))
-        m2.metric("Most Common Type", df['type'].mode()[0] if not df.empty else "N/A")
-        m3.metric("Dominant Color", df['color'].mode()[0] if not df.empty else "N/A")
-        m4.metric("Primary Fabric", df['fabric'].mode()[0] if not df.empty else "N/A")
+        m2.metric("Most Common Type", df["type"].mode()[0] if not df.empty else "N/A")
+        m3.metric("Dominant Color", df["color"].mode()[0] if not df.empty else "N/A")
+        m4.metric("Primary Fabric", df["fabric"].mode()[0] if not df.empty else "N/A")
 
         st.markdown("<br><hr><br>", unsafe_allow_html=True)
 
         chart1, chart2 = st.columns(2)
         with chart1:
             st.markdown("### Category Breakdown")
-            st.bar_chart(df['type'].value_counts())
+            st.bar_chart(df["type"].value_counts())
         with chart2:
             st.markdown("### Formality Spectrum")
-            st.bar_chart(df['formality'].value_counts())
+            st.bar_chart(df["formality"].value_counts())
 
         st.markdown("<br>", unsafe_allow_html=True)
-
-        # AI Gap Analysis
         st.markdown("### AI Closet Gap Analysis")
+
         with st.spinner("Running deep closet inspection..."):
             analytics_data = analytics_ai(user_wardrobe)
 
@@ -887,15 +1048,17 @@ with tab3:
             st.markdown("<div class='metric-label'>Seasonal Readiness Score</div>", unsafe_allow_html=True)
             st.markdown(
                 f"<div class='huge-temp' style='font-size:72px;'>{analytics_data.get('seasonal_readiness', 0)}</div>",
-                unsafe_allow_html=True)
-            st.progress(analytics_data.get('seasonal_readiness', 0) / 100)
+                unsafe_allow_html=True
+            )
+            st.progress(analytics_data.get("seasonal_readiness", 0) / 100)
             st.markdown("</div>", unsafe_allow_html=True)
         with g2:
             st.markdown("<div class='travel-box'>", unsafe_allow_html=True)
             st.markdown("#### 🎯 Stylist Suggestions")
             st.markdown(f"<div class='vibe'>{analytics_data.get('suggestions', '')}</div>", unsafe_allow_html=True)
-            st.markdown("<br>#### 🛒 Missing Essentials", unsafe_allow_html=True)
-            for item in analytics_data.get('missing_essentials', []):
+            st.markdown("<br>")
+            st.markdown("#### 🛒 Missing Essentials")
+            for item in analytics_data.get("missing_essentials", []):
                 st.markdown(f"- {item}")
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -916,12 +1079,12 @@ with tab4:
                 h_col1, h_col2 = st.columns([2, 1])
                 with h_col1:
                     st.markdown("**Outfit Selected:**")
-                    outfit_list = entry['outfit_details'].split(", ")
+                    outfit_list = entry["outfit_details"].split(", ")
                     for item in outfit_list:
                         st.markdown(f"✧ {item}")
                 with h_col2:
                     st.markdown("**Outfit Performance:**")
                     st.markdown(f"Match: **{entry['match_score']}/100**")
                     st.markdown(f"Comfort: **{entry['comfort_score']}/100**")
-                    st.markdown(f"Weather: **{entry['weather_score']}/100**")
+                    st.markdown(f"Weather Defense: **{entry['weather_score']}/100**")
                     st.markdown(f"Style: **{entry['style_score']}/100**")
